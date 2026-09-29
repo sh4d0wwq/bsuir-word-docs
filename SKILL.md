@@ -1,0 +1,65 @@
+---
+name: bsuir-word-docs
+description: Creates Word (.docx) documents formatted per BSUIR standard STP 01-2017 (ГОСТ 2.105) - отчеты по лабораторным работам, пояснительные записки к курсовым и дипломным проектам, рефераты. Uses the word-document-server MCP plus a builder script. Use when the user asks to write/format a lab report, пояснительная записка, курсовой/дипломный проект, отчет, or a .docx "по стандарту/по СТП/по ГОСТ".
+---
+
+# BSUIR Word documents (СТП 01–2017)
+
+Script `S=$HOME/.cursor/skills/bsuir-word-docs/scripts/bsuir_docx.py` (python-docx; Word needed for `fix`/`preview`, PyMuPDF for `preview`).
+Always use absolute .docx paths. The file must be closed in Word while editing.
+
+Scope: this skill only builds the Word document from material the user provides (text, code files, images). Producing that material (running programs, taking screenshots) is outside the skill.
+
+## Rules
+- Unknown data (ФИО, группа, преподаватель, дисциплина, кафедра, тема) → do NOT search the web or other documents. Put a placeholder `[[ФИО студента]]`, `[[Преподаватель]]`, `[[Дисциплина]]`… `fix` lists all `[[…]]`; name them in the final answer.
+- Code listings from files: `@code path` in the markup instead of pasting code into markdown by hand.
+- Write chunk/config files with the Write tool (not via shell strings), keep them in a temp folder outside the result folder, delete at the end.
+- If the target .docx is open (script prints `is locked`), build in the temp folder and copy over it; if the copy fails, save as `<name>_v2.docx` and tell the user.
+
+## Workflow
+1. Write `cfg.json` (below) → `python $S init cfg.json OUT.docx` — styles, margins 30/15/20/27 mm, TNR 14, title page, contents (course/diploma, right after the title page), abstract, page numbers bottom-right (title unnumbered).
+2. Content, one section per chunk: Write `chN.md` in markup (below) → `python $S add OUT.docx chN.md`. Do NOT add bulk text via MCP (one call per paragraph wastes tokens).
+3. Point edits via MCP (see MCP section).
+4. `python $S fix OUT.docx [--pdf]` — normalizes MCP-added pictures/tables, converts formulas to Word equations, updates contents/fields, prints page count and lint warnings (missing references to figures/tables/appendices/sources, citation order, trailing dots, placeholders). Fix warnings, rerun `fix` after any edit.
+5. `python $S preview OUT.docx DIR [1,2,5]` → PNG pages for a visual check (title page, a code page, a figure page); then delete temp files.
+
+## cfg.json
+```json
+{"type":"lab|course|diploma","faculty":"Факультет компьютерных систем и сетей",
+ "department":"Кафедра информатики","discipline":"...","topic":"...","number":"3",
+ "student":"И. И. Иванов","group":"351001","teacher":"П. П. Петров","year":2026,
+ "code":"БГУИР КП 1-40 01 01 012 ПЗ"}
+```
+Optional: `signers` [[label,name],...] (overrides student/teacher; diploma: Студент, Руководитель, Консультанты:, Нормоконтролер, Рецензент), `head`+`dept_short` (diploma "К защите допустить"), `abstract` (lines by \n; RU: РЕФЕРАТ page), `abstract_header`, `assignment_pages` (placeholder pages for бланк задания), `toc` (default true for course/diploma, false for lab), `section_new_page` (default true: every level-1 heading starts a new page), `title_block` (override, `**bold**`, \n; add `Вариант N` here for labs), `header`, `city`, `sign_tab_cm`.
+Names on the title page are full, not abbreviated. Code format: `БГУИР ДП|ДР|КП|КР 1-XX XX XX [XX] NNN ПЗ`.
+
+## Markup (one line = one paragraph)
+| Line | Result |
+|---|---|
+| `# 1 Название` / `## 1.1 ...` / `### 1.1.1 ...` | section (auto CAPS, new page) / subsection / пункт |
+| `#! Введение` | centered unnumbered heading in contents: Введение, Заключение, Список использованных источников |
+| `#= Текст` | centered heading not in contents |
+| `#@ А \| обязательное \| Заголовок` | ПРИЛОЖЕНИЕ А (обязательное / рекомендуемое / справочное), new page |
+| `- пункт;` / `  - ` or `  а) ` / `  1) ` | «– » list item / nested level |
+| `$$ P=U^2/R, $$ (2.1)` | centered formula (UnicodeMath: `x_1`, `a/b`, `√(x)`, `∑_(i=1)^n`; no spaces inside products like `k(k-1)`), number at right |
+| `где P – мощность, Вт;` + `  U – напряжение, В.` | explanation after formula |
+| `![](img.png){w=15}` then `Рисунок 2.1 – Название` | centered figure (width cm ≤ 16.5), caption |
+| `Таблица 2.1 – Название` then `\| a \| b \|` rows | caption + table (1st row = head; empty cell → «–») |
+| ```` ``` ```` block | code listing (Courier New 10, no hyphenation) |
+| `@code path` | listing with the contents of a text file |
+| `\newpage` | page break |
+Code listings get an empty paragraph before and after when they border ordinary text.
+Inline: `**bold**`, `*italic*`, `U_{вх}`, `10^{3}`, placeholder `[[...]]`. Text: `[1]` citations, «ёлочки», « – » en dash.
+
+## MCP (user-word-document-server)
+- Inspect: `get_document_outline`, `find_text_in_document`, `get_paragraph_text_from_document` (avoid `get_document_text`/`get_document_xml` on big docs).
+- Edit: `search_and_replace`, `insert_line_or_paragraph_near_text` (`line_style`), `insert_header_near_text` (`header_style`), `delete_paragraph`.
+- Append single items: `add_heading` (level 1-3), `add_paragraph` with `style` ∈ {StructHeading, PlainHeading, AppendixHeading, FigureCaption, TableCaption, Formula, Where, Sublist, Code}; `add_picture` (width inches), `add_table`, `merge_table_cells*`.
+- Never pass font_name/font_size/bold/color — styles carry formatting. Skip list/`highlight_table_header`/shading tools (non-standard look).
+
+## Structure
+- **lab**: title (with `Вариант N` if given) → `# 1 Цель работы` → sections per методичка/user → `# N Выводы` → sources (if cited). Each level-1 section on a new page, no contents.
+- **course**: title → СОДЕРЖАНИЕ → (РЕФЕРАТ) → (задание) → Введение → numbered sections → Заключение → Список использованных источников → Приложения → (ведомость).
+- **diploma**: title (`head`, all signers) → СОДЕРЖАНИЕ → РЕФЕРАТ (850–1200 chars, 1 page; header line `ТЕМА : дипломный проект / И. О. Фамилия. – Минск : БГУИР, 2026. – п.з. – 79 с., чертежей (плакатов) – 6 л. формата А1.`) → задание (`assignment_pages: 2`) → перечень обозначений (if any) → Введение (≤2 pages: goal, tasks, section summary) → main sections → ТЭО (≤18 %) → охрана труда/энергосбережение (5–7 %) → Заключение (≤2 pages, «разработана», «исследованы»...) → sources → приложения → перечень элементов → ведомость. Target 60–80 pages.
+
+Writing rules (numbers, formulas, tables, figures, bibliography, appendices): read [reference.md](reference.md) before writing content.
