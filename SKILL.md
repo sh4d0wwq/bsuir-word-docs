@@ -19,7 +19,7 @@ Scope: this skill only builds the Word document from material the user provides 
 ## Workflow
 1. Write `cfg.json` (below) and chunks `ch1.md`, `ch2.md`… in markup (below), one section per chunk.
 2. `python $S build cfg.json OUT.docx ch1.md ch2.md …` — builds from scratch: styles, margins 30/15/20/27 mm, TNR 14, title page, contents (course/diploma), page numbers, all chunks, then `fix`. Output: page count, lint (missing references to figures/tables/appendices/sources, citation order, trailing dots, `[[placeholders]]`) and `layout:` lines (near-empty pages, figure split from caption, big gap before a moved figure; oversized images are scaled automatically).
-3. Resolve every lint/layout line by editing chunks with StrReplace, then rerun `build`. Stop when output is clean.
+3. Resolve every lint/layout line by editing chunks with StrReplace, then rerun `build`. Stop when only the placeholder line (if any) remains.
 4. Optional, once at the end: `python $S preview OUT.docx DIR` → one `sheet_NN.png` per 12 pages (low-res overview). Only if something looks wrong: `preview OUT.docx DIR 5,7` for those pages at full size.
 5. Delete temp files.
 
