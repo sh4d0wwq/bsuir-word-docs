@@ -1,10 +1,11 @@
 ﻿"""BSUIR STP 01-2017 .docx builder.
   init CONFIG.json OUT.docx   - styled document + title page (+ abstract, contents)
   add  DOC.docx CHUNK.md      - append markup chunk (see SKILL.md)
-  fix  DOC.docx [--pdf]       - normalize MCP-added content, lint, update fields via Word
-  preview DOC.docx|PDF OUTDIR [1,2,8] - render pages to PNG for visual check
+  fix  DOC.docx [--pdf]       - normalize MCP-added content, lint, update fields and check layout via Word
+  build CONFIG.json OUT.docx CHUNK.md... [--pdf] - init + add all chunks + fix in one call
+  preview DOC.docx|PDF OUTDIR [1,2,8] - contact sheet(s) of all pages, or listed pages at full size
 """
-import json, os, re, subprocess, sys, tempfile, copy
+import contextlib, io, json, os, re, subprocess, sys, tempfile, copy
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
@@ -15,7 +16,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt, RGBColor
 from docx.text.paragraph import Paragraph
 
-FONT, LINE, TEXT_W = "Times New Roman", Pt(18), Cm(16.5)
+FONT, LINE, TEXT_W, TEXT_H = "Times New Roman", Pt(18), Cm(16.5), Cm(21)
 HEADINGS = {"Heading 1", "Heading 2", "Heading 3", "StructHeading", "PlainHeading", "AppendixHeading"}
 
 
@@ -160,7 +161,7 @@ def _page_numbers(section):
 
 
 def cmd_init(cfg_path, out):
-    c = json.load(open(cfg_path, encoding="utf-8"))
+    c = json.load(open(cfg_path, encoding="utf-8-sig"))
     kind = c.get("type", "lab")
     c.setdefault("number", ""); c.setdefault("discipline", ""); c.setdefault("topic", "")
     c["TOPIC"] = c["topic"].upper()
@@ -259,7 +260,7 @@ def _gap_before_code(doc):
 def cmd_add(docp, md):
     doc = Document(docp)
     base = os.path.dirname(os.path.abspath(md))
-    lines = open(md, encoding="utf-8").read().splitlines()
+    lines = open(md, encoding="utf-8-sig").read().splitlines()
     code, where, table, gap = False, False, [], False
     for line in lines + [""]:
         if code:
@@ -344,8 +345,8 @@ def cmd_fix(docp, pdf=False):
                 p.style = "Figure"
             for ext in p._p.iter("{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent"):
                 cx, cy = int(ext.get("cx")), int(ext.get("cy"))
-                if cx > TEXT_W:
-                    k = TEXT_W / cx
+                k = min(1, TEXT_W / cx, TEXT_H / cy)
+                if k < 1:
                     for e in p._p.iter():
                         if e.tag.endswith("}extent") or e.tag.endswith("}ext"):
                             if e.get("cx"):
@@ -429,7 +430,11 @@ def cmd_fix(docp, pdf=False):
     if pdf:
         args.append(os.path.splitext(os.path.abspath(docp))[0] + ".pdf")
     try:
-        out = subprocess.run(args, capture_output=True, timeout=300).stdout.decode("cp866", "replace").strip()
+        raw = subprocess.run(args, capture_output=True, timeout=300).stdout
+        try:
+            out = raw.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            out = raw.decode("cp866", "replace").strip()
     except Exception as e:
         out = f"Word COM недоступен ({e}); обновите поля в Word: Ctrl+A, F9"
     print(out)
@@ -447,8 +452,15 @@ for(var k=0;k<3;k++){var pf=d.Styles(-20-k).ParagraphFormat;pf.Alignment=0;pf.Fi
 pf.LeftIndent=w.CentimetersToPoints(0.5*k);pf.RightIndent=0;}
 for(k=1;k<=d.TablesOfContents.Count;k++)d.TablesOfContents(k).Update();
 d.Fields.Update();for(k=1;k<=d.TablesOfContents.Count;k++)d.TablesOfContents(k).Update();
-var n=d.ComputeStatistics(2);d.Save();if(a.length>1)d.ExportAsFixedFormat(a(1),17);
-WScript.Echo("pages="+n+" formulas_converted="+f+(a.length>1?" pdf="+a(1):""));}
+var n=d.ComputeStatistics(2),L=[];
+for(k=2;k<=n;k++){var s=d.GoTo(1,1,k).Start,e=(k<n)?d.GoTo(1,1,k+1).Start:d.Content.End,g=d.Range(s,e);
+var c=g.Text.replace(/\s/g,"").length;if(c<150&&g.Paragraphs(1).OutlineLevel==10&&g.InlineShapes.Count==0&&g.Tables.Count==0)L.push("layout: стр. "+k+" почти пустая ("+c+" знаков)");}
+for(k=1;k<=d.InlineShapes.Count;k++){var sp=d.InlineShapes(k).Range,pp=sp.Paragraphs(1),pg=sp.Information(3),nx=pp.Next(),pv=pp.Previous();
+if(nx&&nx.Range.Information(3)!=pg)L.push("layout: стр. "+pg+": рисунок и подпись на разных страницах");
+if(pv&&pv.Range.Information(3)<pg){var gap=(d.PageSetup.PageHeight-d.PageSetup.BottomMargin-pv.Range.Characters.Last.Information(6))/17.7;
+if(gap>8)L.push("layout: стр. "+(pg-1)+": пусто ~"+Math.round(gap)+" строк внизу, рисунок перенесен на стр. "+pg+" (уменьшите w или поставьте следующий абзац перед рисунком)");}}
+d.Save();if(a.length>1)d.ExportAsFixedFormat(a(1),17);
+WScript.Echo("pages="+n+" formulas_converted="+f+(a.length>1?" pdf="+a(1):"")+(L.length?"\n"+L.join("\n"):""));}
 catch(err){WScript.Echo("COM error: "+err.message);}
 try{if(d)d.Close(0);}catch(e2){}w.Quit(0);"""
 
@@ -470,17 +482,46 @@ def cmd_preview(docp, outdir, pages=""):
         pdf = os.path.join(tempfile.gettempdir(), "bsuir_preview.pdf")
         subprocess.run(["cscript", "//nologo", js, os.path.abspath(docp), pdf], timeout=300)
     d = pymupdf.open(pdf)
-    nums = [int(x) for x in pages.split(",") if x.strip()] or range(1, d.page_count + 1)
-    for n in nums:
-        if 1 <= n <= d.page_count:
+    nums = [int(x) for x in pages.split(",") if x.strip()]
+    if nums:
+        for n in (x for x in nums if 1 <= x <= d.page_count):
             path = os.path.join(outdir, f"page_{n:02d}.png")
-            d[n - 1].get_pixmap(matrix=pymupdf.Matrix(1.3, 1.3)).save(path)
+            d[n - 1].get_pixmap(matrix=pymupdf.Matrix(1.0, 1.0)).save(path)
+            print(path)
+    else:
+        W, H, COLS, ROWS = 595, 842, 4, 3
+        for s in range(0, d.page_count, COLS * ROWS):
+            rows = min(ROWS, -(-(d.page_count - s) // COLS))
+            sheet = pymupdf.open().new_page(width=W * COLS, height=H * rows)
+            for i, n in enumerate(range(s, min(s + COLS * ROWS, d.page_count))):
+                r = pymupdf.Rect((i % COLS) * W, (i // COLS) * H, (i % COLS + 1) * W, (i // COLS + 1) * H)
+                sheet.show_pdf_page(r, d, n)
+                sheet.draw_rect(r, color=(0.5, 0.5, 0.5), width=2)
+            path = os.path.join(outdir, f"sheet_{s + 1:02d}.png")
+            sheet.get_pixmap(matrix=pymupdf.Matrix(0.45, 0.45)).save(path)
             print(path)
     print(f"pages={d.page_count}")
 
 
+def cmd_build(cfg, out, chunks, pdf=False):
+    tmp = out + ".tmp.docx"
+    with contextlib.redirect_stdout(io.StringIO()):
+        cmd_init(cfg, tmp)
+        for ch in chunks:
+            cmd_add(tmp, ch)
+    try:
+        os.replace(tmp, out)
+    except PermissionError:
+        os.remove(tmp)
+        sys.exit(f"error: {out} is locked (open in Word?). Close it and rerun build.")
+    cmd_fix(out, pdf)
+
+
 if __name__ == "__main__":
     cmd, *rest = sys.argv[1:]
+    flags = [x for x in rest if x.startswith("--")]
+    rest = [x for x in rest if not x.startswith("--")]
     {"init": lambda: cmd_init(*rest[:2]), "add": lambda: cmd_add(*rest[:2]),
-     "fix": lambda: cmd_fix(rest[0], "--pdf" in rest),
+     "fix": lambda: cmd_fix(rest[0], "--pdf" in flags),
+     "build": lambda: cmd_build(rest[0], rest[1], rest[2:], "--pdf" in flags),
      "preview": lambda: cmd_preview(*rest[:3])}[cmd]()

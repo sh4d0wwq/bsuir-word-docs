@@ -5,7 +5,7 @@ description: Creates Word (.docx) documents formatted per BSUIR standard STP 01-
 
 # BSUIR Word documents (СТП 01–2017)
 
-Script `S=$HOME/.cursor/skills/bsuir-word-docs/scripts/bsuir_docx.py` (python-docx; Word needed for `fix`/`preview`, PyMuPDF for `preview`).
+Script `S=$HOME/.cursor/skills/bsuir-word-docs/scripts/bsuir_docx.py` (python-docx; Word needed for `build`/`fix`/`preview`, PyMuPDF for `preview`).
 Always use absolute .docx paths. The file must be closed in Word while editing.
 
 Scope: this skill only builds the Word document from material the user provides (text, code files, images). Producing that material (running programs, taking screenshots) is outside the skill.
@@ -17,11 +17,19 @@ Scope: this skill only builds the Word document from material the user provides 
 - If the target .docx is open (script prints `is locked`), build in the temp folder and copy over it; if the copy fails, save as `<name>_v2.docx` and tell the user.
 
 ## Workflow
-1. Write `cfg.json` (below) → `python $S init cfg.json OUT.docx` — styles, margins 30/15/20/27 mm, TNR 14, title page, contents (course/diploma, right after the title page), abstract, page numbers bottom-right (title unnumbered).
-2. Content, one section per chunk: Write `chN.md` in markup (below) → `python $S add OUT.docx chN.md`. Do NOT add bulk text via MCP (one call per paragraph wastes tokens).
-3. Point edits via MCP (see MCP section).
-4. `python $S fix OUT.docx [--pdf]` — normalizes MCP-added pictures/tables, converts formulas to Word equations, updates contents/fields, prints page count and lint warnings (missing references to figures/tables/appendices/sources, citation order, trailing dots, placeholders). Fix warnings, rerun `fix` after any edit.
-5. `python $S preview OUT.docx DIR [1,2,5]` → PNG pages for a visual check (title page, a code page, a figure page); then delete temp files.
+1. Write `cfg.json` (below) and chunks `ch1.md`, `ch2.md`… in markup (below), one section per chunk.
+2. `python $S build cfg.json OUT.docx ch1.md ch2.md …` — builds from scratch: styles, margins 30/15/20/27 mm, TNR 14, title page, contents (course/diploma), page numbers, all chunks, then `fix`. Output: page count, lint (missing references to figures/tables/appendices/sources, citation order, trailing dots, `[[placeholders]]`) and `layout:` lines (near-empty pages, figure split from caption, big gap before a moved figure; oversized images are scaled automatically).
+3. Resolve every lint/layout line by editing chunks with StrReplace, then rerun `build`. Stop when output is clean.
+4. Optional, once at the end: `python $S preview OUT.docx DIR` → one `sheet_NN.png` per 12 pages (low-res overview). Only if something looks wrong: `preview OUT.docx DIR 5,7` for those pages at full size.
+5. Delete temp files.
+
+Later edits to an existing document without sources: MCP point edits (below), then `python $S fix OUT.docx`. `build` overwrites MCP edits.
+
+## Token economy
+- Never read `bsuir_docx.py`; this file documents everything needed.
+- Do not add bulk text via MCP (one call per paragraph). Do not rewrite whole chunk files; StrReplace the fragment.
+- Do not re-read files you wrote or that did not change; do not preview after text-only edits — trust `build` output.
+- Large sources (notebooks, logs): extract only the needed text/figures with a short script, never Read whole files with outputs.
 
 ## cfg.json
 ```json
@@ -31,6 +39,7 @@ Scope: this skill only builds the Word document from material the user provides 
  "code":"БГУИР КП 1-40 01 01 012 ПЗ"}
 ```
 Optional: `signers` [[label,name],...] (overrides student/teacher; diploma: Студент, Руководитель, Консультанты:, Нормоконтролер, Рецензент), `head`+`dept_short` (diploma "К защите допустить"), `abstract` (lines by \n; RU: РЕФЕРАТ page), `abstract_header`, `assignment_pages` (placeholder pages for бланк задания), `toc` (default true for course/diploma, false for lab), `section_new_page` (default true: every level-1 heading starts a new page), `title_block` (override, `**bold**`, \n; add `Вариант N` here for labs), `header`, `city`, `sign_tab_cm`.
+Default `title_block` — lab: `**ОТЧЕТ** / по лабораторной работе № {number} / по дисциплине «{discipline}» / на тему / «{topic}»`; course: `**ПОЯСНИТЕЛЬНАЯ ЗАПИСКА** / к курсовому проекту / по дисциплине «…» / на тему / **ТЕМА**`; diploma: `**ПОЯСНИТЕЛЬНАЯ ЗАПИСКА** / к дипломному проекту / на тему / **ТЕМА**` (` / ` = line break `\n`). Signers default: lab `Выполнил: студент гр. {group}` / `Проверил:`; course `Студент гр. {group}` / `Руководитель`.
 Names on the title page are full, not abbreviated. Code format: `БГУИР ДП|ДР|КП|КР 1-XX XX XX [XX] NNN ПЗ`.
 
 ## Markup (one line = one paragraph)
