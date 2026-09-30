@@ -334,10 +334,153 @@ def _sname(p):
         return "Normal"
 
 
+LIST_KINDS = {"dash": ("bullet", "–"), "dec": ("decimal", "%1)"), "let": ("russianLower", "%1)")}
+LIST_BASE = 900
+RE_ITEM = re.compile(r"^(– |\d+\) |[а-я]\) )")
+
+
+def _list_abstracts(numbering):
+    """abstractNumId -> (kind, level); one single-level definition per kind and nesting level."""
+    ids = {}
+    for i, (kind, (fmt, txt)) in enumerate(LIST_KINDS.items()):
+        for lvl in (0, 1):
+            aid = LIST_BASE + i * 2 + lvl
+            ids[aid] = (kind, lvl)
+            if numbering.xpath(f'./w:abstractNum[@w:abstractNumId="{aid}"]'):
+                continue
+            a = _el("w:abstractNum", abstractNumId=aid)
+            a.append(_el("w:multiLevelType", val="singleLevel"))
+            lv = _el("w:lvl", ilvl=0)
+            for tag, val in (("start", 1), ("numFmt", fmt), ("suff", "space"), ("lvlText", txt), ("lvlJc", "left")):
+                lv.append(_el("w:" + tag, val=val))
+            ppr = _el("w:pPr"); ppr.append(_el("w:ind", left=0, firstLine=709 * (lvl + 1))); lv.append(ppr)
+            rpr = _el("w:rPr"); rpr.append(_el("w:rFonts", ascii=FONT, hAnsi=FONT, cs=FONT, eastAsia=FONT)); lv.append(rpr)
+            a.append(lv)
+            first_num = numbering.find(qn("w:num"))
+            if first_num is not None:
+                first_num.addprevious(a)
+            else:
+                numbering.append(a)
+    return ids
+
+
+def fix_lists(doc):
+    """Turn text list items («– », «1) », «а) » in Normal/Sublist) into Word numbering; restart per list."""
+    numbering = doc.part.numbering_part.element
+    abstracts = _list_abstracts(numbering)
+    num_abs = {int(n.get(qn("w:numId"))): int(n.find(qn("w:abstractNumId")).get(qn("w:val")))
+               for n in numbering.findall(qn("w:num"))}
+    bullets, cur = {}, {}
+
+    def new_num(aid, restart):
+        n = numbering.add_num(aid)
+        if restart:
+            o = _el("w:lvlOverride", ilvl=0); o.append(_el("w:startOverride", val=1)); n.append(o)
+        nid = int(n.get(qn("w:numId"))); num_abs[nid] = aid
+        return nid
+
+    for el in doc.element.body:
+        if el.tag != qn("w:p"):
+            cur.clear(); continue
+        p = Paragraph(el, doc._body)
+        numpr = el.pPr.numPr if el.pPr is not None else None
+        if numpr is not None and numpr.numId is not None and num_abs.get(numpr.numId.val) in abstracts:
+            kind, lvl = abstracts[num_abs[numpr.numId.val]]
+            cur[lvl] = (kind, numpr.numId.val)
+            if lvl == 0: cur.pop(1, None)
+            continue
+        sn, m = _sname(p), RE_ITEM.match(p.text)
+        if not (m and sn in ("Normal", "Sublist")):
+            cur.clear(); continue
+        lvl = int(sn == "Sublist")
+        kind = "dash" if m.group(1) == "– " else "dec" if m.group(1)[0].isdigit() else "let"
+        aid = LIST_BASE + list(LIST_KINDS).index(kind) * 2 + lvl
+        if kind == "dash":
+            nid = bullets.get(aid) or bullets.setdefault(aid, new_num(aid, False))
+        elif cur.get(lvl, (None,))[0] == kind:
+            nid = cur[lvl][1]
+        else:
+            nid = new_num(aid, True)
+        cur[lvl] = (kind, nid)
+        if lvl == 0: cur.pop(1, None)
+        cut = len(m.group(1))
+        for r in p.runs:
+            k = min(cut, len(r.text)); r.text = r.text[k:]; cut -= k
+            if not cut: break
+        np_ = el.get_or_add_pPr().get_or_add_numPr()
+        np_.get_or_add_ilvl().val = 0
+        np_.get_or_add_numId().val = nid
+
+
+HEAD_ABS = 950
+RE_HNUM = re.compile(r"^\s*(\d+(?:\.\d+)*)\s+")
+
+
+def _heading_numbering(doc):
+    """Multilevel list 1 / 1.1 / 1.1.1 linked to Heading 1-3; returns its numId."""
+    numbering = doc.part.numbering_part.element
+    for n in numbering.findall(qn("w:num")):
+        if n.find(qn("w:abstractNumId")).get(qn("w:val")) == str(HEAD_ABS):
+            return int(n.get(qn("w:numId")))
+    a = _el("w:abstractNum", abstractNumId=HEAD_ABS)
+    a.append(_el("w:multiLevelType", val="multilevel"))
+    for i in range(3):
+        lv = _el("w:lvl", ilvl=i)
+        for tag, val in (("start", 1), ("numFmt", "decimal"), ("pStyle", doc.styles[f"Heading {i + 1}"].style_id),
+                         ("suff", "space"), ("lvlText", ".".join(f"%{k + 1}" for k in range(i + 1))),
+                         ("lvlJc", "left")):
+            lv.append(_el("w:" + tag, val=val))
+        ppr = _el("w:pPr"); ppr.append(_el("w:ind", left=709, firstLine=0)); lv.append(ppr)
+        a.append(lv)
+    first_num = numbering.find(qn("w:num"))
+    if first_num is not None:
+        first_num.addprevious(a)
+    else:
+        numbering.append(a)
+    return int(numbering.add_num(HEAD_ABS).get(qn("w:numId")))
+
+
+def fix_headings(doc):
+    """Auto-number Heading 1-3 (number typed in the text is removed and checked); appendix headings keep text numbers."""
+    nid, warn = _heading_numbering(doc), []
+    for i in range(3):
+        np_ = doc.styles[f"Heading {i + 1}"].element.get_or_add_pPr().get_or_add_numPr()
+        np_.get_or_add_ilvl().val = i
+        np_.get_or_add_numId().val = nid
+    for name in ("StructHeading", "AppendixHeading"):
+        doc.styles[name].element.get_or_add_pPr().get_or_add_numPr().get_or_add_numId().val = 0
+    cnt, in_app = [0, 0, 0], False
+    for p in doc.paragraphs:
+        sn = _sname(p)
+        if sn in ("AppendixHeading", "StructHeading"):
+            in_app = sn == "AppendixHeading"
+        if sn not in ("Heading 1", "Heading 2", "Heading 3"):
+            continue
+        if in_app:
+            p._p.get_or_add_pPr().get_or_add_numPr().get_or_add_numId().val = 0
+            p.paragraph_format.left_indent, p.paragraph_format.first_line_indent = Cm(1.25), 0
+            continue
+        lvl = int(sn[-1]) - 1
+        cnt[lvl] += 1
+        cnt[lvl + 1:] = [0] * (2 - lvl)
+        m = RE_HNUM.match(p.text)
+        if not m:
+            continue
+        want = ".".join(map(str, cnt[:lvl + 1]))
+        if m.group(1) != want:
+            warn.append(f"номер заголовка {m.group(1)} заменен автономером {want}: {p.text[m.end():][:40]}")
+        cut = m.end()
+        for r in p.runs:
+            k = min(cut, len(r.text)); r.text = r.text[k:]; cut -= k
+            if not cut: break
+    return warn
+
+
 def cmd_fix(docp, pdf=False):
     doc = Document(docp)
     body = doc.element.body
-    warn = []
+    warn = fix_headings(doc)
+    fix_lists(doc)
     # pictures added via MCP -> Figure style, clamp width
     for p in doc.paragraphs:
         if p._p.findall(".//" + qn("w:drawing")):
