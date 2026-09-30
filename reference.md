@@ -23,7 +23,7 @@
 - References: «в формуле (2.1)», «подставляя выражение (3.6) в уравнение (3.2)».
 
 ## Figures
-- All illustrations are «Рисунок». Place after the paragraph with the first reference; reference every figure: «на рисунке 2.1», «(см. рисунок 2)», «в соответствии с рисунком 5.1».
+- Do not create the real illustration. The figure slot is a dummy PNG inserted by `![](name.png){w=15}` (the file is not read); the caption follows it. All illustrations are «Рисунок». Place after the paragraph with the first reference; reference every figure: «на рисунке 2.1», «(см. рисунок 2)», «в соответствии с рисунком 5.1».
 - Caption: `Рисунок 2.1 – Название` (section numbering) / `Рисунок 7` (through) / `Рисунок А.2` (appendix); centered, no final dot. Legend between picture and caption in one line: `1 – усилитель; 2 – датчик`.
 - Recommended sizes ≈ 92×150 or 150×240 mm; readable without rotation or rotated 90° clockwise. Schemes: no frames/stamps, only relevant elements. Monochrome by default.
 - Split figure: repeat `Рисунок 2.1, лист 2`.

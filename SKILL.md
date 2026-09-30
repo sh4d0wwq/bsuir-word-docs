@@ -52,9 +52,9 @@ Names on the title page are full, not abbreviated. Code format: `БГУИР ДП
 | `- пункт;` or `1) ` / `а) ` / `  - ` or `  а) ` / `  1) ` | list item / nested level (Word lists, numbering restarts per list) |
 | `$$ P=U^2/R, $$ (2.1)` | centered formula (UnicodeMath: `x_1`, `a/b`, `√(x)`, `∑_(i=1)^n`; no spaces inside products like `k(k-1)`), number at right |
 | `где P – мощность, Вт;` + `  U – напряжение, В.` | explanation after formula |
-| `![](img.png){w=15}` then `Рисунок 2.1 – Название` | centered figure (width cm ≤ 16.5), caption |
+| `![](img.png){w=15}` then `Рисунок 2.1 – Название` | centered dummy PNG (the file is not read; width cm ≤ 16.5), caption |
 | `Таблица 2.1 – Название` then `\| a \| b \|` rows | caption + table (1st row = head; empty cell → «–») |
-| ```` ``` ```` block | code listing (Courier New 10, no hyphenation) |
+| ```` ``` ```` block | code listing (Courier New 12, no hyphenation) |
 | `@code path` | listing with the contents of a text file |
 | `\newpage` | page break |
 Code listings get an empty paragraph before and after when they border ordinary text.
@@ -63,7 +63,8 @@ Inline: `**bold**`, `*italic*`, `U_{вх}`, `10^{3}`, placeholder `[[...]]`. Tex
 ## MCP (user-word-document-server)
 - Inspect: `get_document_outline`, `find_text_in_document`, `get_paragraph_text_from_document` (avoid `get_document_text`/`get_document_xml` on big docs).
 - Edit: `search_and_replace`, `insert_line_or_paragraph_near_text` (`line_style`), `insert_header_near_text` (`header_style`), `delete_paragraph`.
-- Append single items: `add_heading` (level 1-3, text without number – numbered automatically), `add_paragraph` with `style` ∈ {StructHeading, PlainHeading, AppendixHeading, FigureCaption, TableCaption, Formula, Where, Sublist, Code}; `add_picture` (width inches), `add_table`, `merge_table_cells*`.
+- Append single items: `add_heading` (level 1-3, text without number – numbered automatically), `add_paragraph` with `style` ∈ {StructHeading, PlainHeading, AppendixHeading, FigureCaption, TableCaption, Formula, Where, Sublist, Code}; `add_table`, `merge_table_cells*`.
+- Figures: do not draw or embed the real image and do not use a text placeholder. Write `![](name.png){w=15}`; build inserts a dummy PNG of that width, then the caption.
 - List items via MCP: `add_paragraph`/`insert_line_or_paragraph_near_text` with text `– …`, `1) …`, `а) …` (style Normal, or Sublist for nested); `fix` turns them into Word lists.
 - Never pass font_name/font_size/bold/color — styles carry formatting. Skip list/`highlight_table_header`/shading tools (non-standard look).
 

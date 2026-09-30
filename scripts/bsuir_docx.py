@@ -5,7 +5,7 @@
   build CONFIG.json OUT.docx CHUNK.md... [--pdf] - init + add all chunks + fix in one call
   preview DOC.docx|PDF OUTDIR [1,2,8] - contact sheet(s) of all pages, or listed pages at full size
 """
-import contextlib, io, json, os, re, subprocess, sys, tempfile, copy
+import contextlib, io, json, os, re, struct, subprocess, sys, tempfile, zlib, copy
 from docx import Document
 from docx.enum.section import WD_SECTION
 from docx.enum.style import WD_STYLE_TYPE
@@ -73,25 +73,30 @@ def setup_styles(doc, new_page_sections=True):
     doc.settings.element.append(_el("w:autoHyphenation"))
     _style(doc, "Normal", size=14, align=AL.JUSTIFY, fi=Cm(1.25), li=0, sb=0, sa=0, ls=1.1)
     doc.styles["Normal"].paragraph_format.widow_control = True
-    _style(doc, "Heading 1", size=16, bold=True, caps=True, align=AL.LEFT, fi=0, li=Cm(1.25),
+    _style(doc, "Heading 1", size=14, bold=True, caps=True, align=AL.LEFT, fi=0, li=Cm(1.25),
            sb=0 if new_page_sections else LINE, sa=LINE, kwn=True, pbb=new_page_sections, nohyph=True)
     for h in ("Heading 2", "Heading 3"):
         _style(doc, h, size=14, bold=True, caps=False, align=AL.LEFT, fi=0, li=Cm(1.25), sb=LINE, sa=LINE,
                kwn=True, nohyph=True)
     _style(doc, "StructHeading", "Heading 1", align=AL.CENTER, li=0, sb=0, pbb=True, outline=0)
-    _style(doc, "PlainHeading", "Normal", size=16, bold=True, caps=True, align=AL.CENTER, fi=0, sa=LINE,
+    _style(doc, "PlainHeading", "Normal", size=14, bold=True, caps=True, align=AL.CENTER, fi=0, sa=LINE,
            kwn=True, nohyph=True)
     _style(doc, "AppendixHeading", "Heading 1", caps=False, align=AL.CENTER, li=0, sb=0, pbb=True, outline=0)
     _style(doc, "Figure", align=AL.CENTER, fi=0, sb=LINE, sa=LINE, ls=1.0, kwn=True)
     _style(doc, "FigureCaption", align=AL.CENTER, fi=0, sa=LINE, nohyph=True)
     _style(doc, "TableCaption", align=AL.LEFT, fi=0, sb=LINE, kwn=True, nohyph=True)
-    _style(doc, "TableText", size=12, align=AL.LEFT, fi=0, ls=1.0)
+    _style(doc, "TableText", size=14, align=AL.LEFT, fi=0, ls=1.1)
     _style(doc, "Formula", fi=0, sb=LINE, sa=LINE,
            tabs=((Cm(8.25), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES),
                  (TEXT_W, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)))
     _style(doc, "Where", fi=Cm(-1), li=Cm(1), align=AL.LEFT)
     _style(doc, "Sublist", fi=Cm(2.5))
-    _style(doc, "Code", size=10, align=AL.LEFT, fi=0, ls=1.0, font="Courier New", nohyph=True)
+    _style(doc, "Code", size=12, align=AL.LEFT, fi=0, ls=1.0, font="Courier New", nohyph=True)
+    for extra in ("Header", "Footer"):
+        try:
+            _font(doc.styles[extra], 14)
+        except KeyError:
+            pass
 
 
 INLINE = re.compile(r"(\*\*.+?\*\*|\*.+?\*|_\{.+?\}|\^\{.+?\})")
@@ -228,6 +233,26 @@ RE_IMG = re.compile(r"^!\[.*?\]\((.+?)\)(?:\{w=([\d.]+)\})?$")
 RE_FORM = re.compile(r"^\$\$(.+?)\$\$\s*(\(.+?\))?$")
 
 
+def _dummy_png():
+    """Gray framed PNG used instead of a real figure."""
+    path = os.path.join(tempfile.gettempdir(), "bsuir_figure_placeholder.png")
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        return path
+    w, h = 900, 560
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)
+        for x in range(w):
+            edge = x < 4 or y < 4 or x >= w - 4 or y >= h - 4
+            raw += b"\x66\x66\x66" if edge else b"\xe6\xe6\xe6"
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b"")
+    open(path, "wb").write(png)
+    return path
+
+
 def add_table(doc, rows):
     rows = [r for r in rows if not re.fullmatch(r"[\s|:\-]+", r)]
     cells = [[x.strip() for x in r.strip().strip("|").split("|")] for r in rows]
@@ -291,9 +316,9 @@ def cmd_add(docp, md):
                 doc.add_paragraph()
             gap = False
         if m:
-            path = m.group(1) if os.path.isabs(m.group(1)) else os.path.join(base, m.group(1))
+            width = min(float(m.group(2)) if m.group(2) else 14, 16.5)
             p = doc.add_paragraph(style="Figure")
-            p.add_run().add_picture(path, width=Cm(float(m.group(2))) if m.group(2) else None)
+            p.add_run().add_picture(_dummy_png(), width=Cm(width))
         elif f:
             para(doc, "\t" + f.group(1).strip() + ("\t" + f.group(2) if f.group(2) else ""), "Formula", raw=True)
         elif s.startswith("#@ "):
@@ -494,14 +519,40 @@ def cmd_fix(docp, pdf=False):
                         if e.tag.endswith("}extent") or e.tag.endswith("}ext"):
                             if e.get("cx"):
                                 e.set("cx", str(int(int(e.get("cx")) * k))); e.set("cy", str(int(int(e.get("cy")) * k)))
-    # tables
+    # tables: exact text width, 16.5 cm between the 30 mm and 15 mm margins
+    sec = doc.sections[-1]
+    text_twips = int(round((sec.page_width - sec.left_margin - sec.right_margin) / 635))
     for t in doc.tables:
         t.style = "Table Grid"
         t.alignment = WD_TABLE_ALIGNMENT.LEFT
-        tblPr = t._tbl.tblPr
-        for w in tblPr.findall(qn("w:tblW")):
-            tblPr.remove(w)
-        tblPr.append(_el("w:tblW", w=5000, type="pct"))
+        tbl = t._tbl
+        tblPr = tbl.tblPr
+        for tag in ("w:tblW", "w:tblInd", "w:tblLayout"):
+            for old in tblPr.findall(qn(tag)):
+                tblPr.remove(old)
+        tblPr.append(_el("w:tblW", w=text_twips, type="dxa"))
+        tblPr.append(_el("w:tblInd", w=108, type="dxa"))
+        tblPr.append(_el("w:tblLayout", type="fixed"))
+        grid = tbl.find(qn("w:tblGrid"))
+        cols = grid.findall(qn("w:gridCol")) if grid is not None else []
+        n = len(cols) or len(t.columns)
+        base, rem = divmod(text_twips, n)
+        widths = [base + (1 if i < rem else 0) for i in range(n)]
+        for col, width in zip(cols, widths):
+            col.set(qn("w:w"), str(width))
+        for row in t.rows:
+            seen, ci = set(), 0
+            for cell in row.cells:
+                if id(cell._tc) in seen or ci >= n:
+                    continue
+                seen.add(id(cell._tc))
+                tcPr = cell._tc.get_or_add_tcPr()
+                for old in tcPr.findall(qn("w:tcW")):
+                    tcPr.remove(old)
+                span = tcPr.find(qn("w:gridSpan"))
+                k = int(span.get(qn("w:val"))) if span is not None else 1
+                tcPr.append(_el("w:tcW", w=sum(widths[ci:ci + k]), type="dxa"))
+                ci += k
         for i, row in enumerate(t.rows):
             trPr = row._tr.get_or_add_trPr()
             if not trPr.findall(qn("w:cantSplit")):
@@ -591,8 +642,8 @@ for(var i=1;i<=d.Paragraphs.Count;i++){var p=d.Paragraphs(i);
 if(p.Style.NameLocal!="Formula"||p.Range.OMaths.Count>0)continue;
 var r=p.Range,t=r.Text,x=t.indexOf("\t"),y=t.lastIndexOf("\t");if(x<0)continue;
 var e=(y>x)?r.Start+y:r.End-1,m=d.Range(r.Start+x+1,e);d.OMaths.Add(m).OMaths(1).BuildUp();f++;}
-for(var k=0;k<3;k++){var pf=d.Styles(-20-k).ParagraphFormat;pf.Alignment=0;pf.FirstLineIndent=0;
-pf.LeftIndent=w.CentimetersToPoints(0.5*k);pf.RightIndent=0;}
+for(var k=0;k<3;k++){var st=d.Styles(-20-k),pf=st.ParagraphFormat;pf.Alignment=0;pf.FirstLineIndent=0;
+pf.LeftIndent=w.CentimetersToPoints(0.5*k);pf.RightIndent=0;st.Font.Name="Times New Roman";st.Font.Size=14;}
 for(k=1;k<=d.TablesOfContents.Count;k++)d.TablesOfContents(k).Update();
 d.Fields.Update();for(k=1;k<=d.TablesOfContents.Count;k++)d.TablesOfContents(k).Update();
 var n=d.ComputeStatistics(2),L=[];
