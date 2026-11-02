@@ -1,4 +1,4 @@
-﻿"""BSUIR STP 01-2017 .docx builder.
+"""BSUIR STP 01-2017 .docx builder.
   init CONFIG.json OUT.docx   - styled document + title page (+ abstract, contents)
   add  DOC.docx CHUNK.md      - append markup chunk (see SKILL.md)
   fix  DOC.docx [--pdf]       - normalize MCP-added content, lint, update fields and check layout via Word
@@ -165,6 +165,65 @@ def _page_numbers(section):
     field(_plain(section.footer.paragraphs[0], AL.RIGHT), "PAGE", "1")
 
 
+def _or_placeholder(value, placeholder):
+    value = "" if value is None else str(value).strip()
+    return value or placeholder
+
+
+TITLE_SAMPLE = os.path.join(os.path.dirname(__file__), "..", "samples", "title_course.docx")
+
+
+def _course_title(doc, c):
+    """Course title page copied from samples/title_course.docx; cfg fills the placeholders."""
+    src = Document(TITLE_SAMPLE)
+    student, teacher = c.get("student") or "", c.get("teacher") or ""
+    for i, pair in enumerate(c.get("signers") or []):
+        if i == 0 and not str(student).strip() and len(pair) > 1:
+            student = pair[1]
+        elif i == 1 and not str(teacher).strip() and len(pair) > 1:
+            teacher = pair[1]
+    topic = _or_placeholder(c.get("topic"), "[[ТЕМА]]")
+    if topic != "[[ТЕМА]]":
+        topic = topic.upper()
+    repl = {
+        "[[факультет]]": _or_placeholder(c.get("faculty"), "[[факультет]]"),
+        "[[кафедра]]": _or_placeholder(c.get("department"), "[[кафедра]]"),
+        "[[дисциплина]]": _or_placeholder(c.get("discipline"), "[[дисциплина]]"),
+        "[[ТЕМА]]": topic,
+        "[[шифр]]": _or_placeholder(c.get("code"), "[[шифр]]"),
+        "[[студент]]": _or_placeholder(student, "[[студент]]"),
+        "[[руководитель]]": _or_placeholder(teacher, "[[руководитель]]"),
+        "[[год]]": _or_placeholder(c.get("year"), "[[год]]"),
+    }
+    city = (c.get("city") or "Минск").strip() or "Минск"
+    body = doc.element.body
+    sect = body.find(qn("w:sectPr"))
+    for child in list(body):
+        if child.tag == qn("w:p"):
+            body.remove(child)
+    for el in src.element.body:
+        if el.tag != qn("w:p"):
+            continue
+        node = copy.deepcopy(el)
+        for t in node.iter(qn("w:t")):
+            if not t.text:
+                continue
+            for a, b in repl.items():
+                t.text = t.text.replace(a, b)
+            t.text = t.text.replace("Минск", city)
+        pPr = node.find(qn("w:pPr"))
+        if pPr is None:
+            pPr = _el("w:pPr")
+            node.insert(0, pPr)
+        sp = pPr.find(qn("w:spacing"))
+        if sp is None:
+            sp = _el("w:spacing")
+            pPr.append(sp)
+        sp.set(qn("w:line"), "240")
+        sp.set(qn("w:lineRule"), "auto")
+        sect.addprevious(node)
+
+
 def cmd_init(cfg_path, out):
     c = json.load(open(cfg_path, encoding="utf-8-sig"))
     kind = c.get("type", "lab")
@@ -177,31 +236,37 @@ def cmd_init(cfg_path, out):
     s0.top_margin, s0.bottom_margin, s0.left_margin, s0.right_margin = Mm(20), Mm(27), Mm(30), Mm(15)
     s0.footer_distance = Mm(17)
 
-    # title page: blocks spread vertically (vAlign=both)
-    _plain(para(doc, c.get("header", "Министерство образования Республики Беларусь\n\nУчреждение образования\n"
-                                "БЕЛОРУССКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ\nИНФОРМАТИКИ И РАДИОЭЛЕКТРОНИКИ")))
-    fac = "\n".join(x for x in (c.get("faculty"), c.get("department")) if x)
-    if fac:
-        _plain(para(doc, fac), AL.LEFT if kind == "diploma" else AL.CENTER)
-    if c.get("head"):
-        _plain(para(doc, f"К защите допустить:\nЗаведующий кафедрой {c.get('dept_short', '')}\n"
-                         f"____________{c['head']}"), AL.LEFT, Cm(9))
-    _plain(para(doc, c.get("title_block") or TITLES[kind].format(**c)))
-    if c.get("code"):
-        _plain(para(doc, c["code"]))
-    signers = c.get("signers")
-    if not signers and c.get("student"):
-        g = f" гр. {c['group']}" if c.get("group") else ""
-        signers = [[f"Выполнил: студент{g}" if kind == "lab" else f"Студент{g}", c["student"]]]
-        if c.get("teacher"):
-            signers.append(["Проверил:" if kind == "lab" else "Руководитель", c["teacher"]])
-    if signers:
-        p = _plain(para(doc, "\n".join(f"{a}\t{b}" for a, b in signers)), AL.LEFT)
-        p.paragraph_format.tab_stops.add_tab_stop(Cm(c.get("sign_tab_cm", 10)))
-    _plain(para(doc, f"{c.get('city', 'Минск')} {c.get('year', '')}".strip()))
-    s0._sectPr.find(qn("w:cols")).addnext(_el("w:vAlign", val="both"))
+    if kind == "course":
+        s0.bottom_margin = Mm(20)
+        _course_title(doc, c)
+    else:
+        # title page: blocks spread vertically (vAlign=both)
+        _plain(para(doc, c.get("header", "Министерство образования Республики Беларусь\n\nУчреждение образования\n"
+                                    "БЕЛОРУССКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ\nИНФОРМАТИКИ И РАДИОЭЛЕКТРОНИКИ")))
+        fac = "\n".join(x for x in (c.get("faculty"), c.get("department")) if x)
+        if fac:
+            _plain(para(doc, fac), AL.LEFT if kind == "diploma" else AL.CENTER)
+        if c.get("head"):
+            _plain(para(doc, f"К защите допустить:\nЗаведующий кафедрой {c.get('dept_short', '')}\n"
+                             f"____________{c['head']}"), AL.LEFT, Cm(9))
+        _plain(para(doc, c.get("title_block") or TITLES[kind].format(**c)))
+        if c.get("code"):
+            _plain(para(doc, c["code"]))
+        signers = c.get("signers")
+        if not signers and c.get("student"):
+            g = f" гр. {c['group']}" if c.get("group") else ""
+            signers = [[f"Выполнил: студент{g}" if kind == "lab" else f"Студент{g}", c["student"]]]
+            if c.get("teacher"):
+                signers.append(["Проверил:" if kind == "lab" else "Руководитель", c["teacher"]])
+        if signers:
+            p = _plain(para(doc, "\n".join(f"{a}\t{b}" for a, b in signers)), AL.LEFT)
+            p.paragraph_format.tab_stops.add_tab_stop(Cm(c.get("sign_tab_cm", 10)))
+        _plain(para(doc, f"{c.get('city', 'Минск')} {c.get('year', '')}".strip()))
+        s0._sectPr.find(qn("w:cols")).addnext(_el("w:vAlign", val="both"))
 
     new = doc.add_section(WD_SECTION.NEW_PAGE)
+    if kind == "course":
+        new.bottom_margin = Mm(27)
     va = new._sectPr.find(qn("w:vAlign"))
     if va is not None:
         new._sectPr.remove(va)
@@ -316,9 +381,13 @@ def cmd_add(docp, md):
                 doc.add_paragraph()
             gap = False
         if m:
-            width = min(float(m.group(2)) if m.group(2) else 14, 16.5)
+            path = m.group(1) if os.path.isabs(m.group(1)) else os.path.join(base, m.group(1))
             p = doc.add_paragraph(style="Figure")
-            p.add_run().add_picture(_dummy_png(), width=Cm(width))
+            if os.path.isfile(path):
+                p.add_run().add_picture(path, width=Cm(min(float(m.group(2)), 16.5)) if m.group(2) else None)
+            else:
+                width = min(float(m.group(2)) if m.group(2) else 14, 16.5)
+                p.add_run().add_picture(_dummy_png(), width=Cm(width))
         elif f:
             para(doc, "\t" + f.group(1).strip() + ("\t" + f.group(2) if f.group(2) else ""), "Formula", raw=True)
         elif s.startswith("#@ "):
@@ -557,6 +626,8 @@ def cmd_fix(docp, pdf=False):
             trPr = row._tr.get_or_add_trPr()
             if not trPr.findall(qn("w:cantSplit")):
                 trPr.append(_el("w:cantSplit"))
+            # Word repeats this row if a part still crosses a page.
+            # The «Продолжение таблицы» line is inserted later, after pagination.
             if i == 0 and not trPr.findall(qn("w:tblHeader")):
                 trPr.append(_el("w:tblHeader"))
             for cell in row.cells:
@@ -568,8 +639,12 @@ def cmd_fix(docp, pdf=False):
         prev, nxt = t._tbl.getprevious(), t._tbl.getnext()
         if prev is None or prev.tag != qn("w:p") or _sname(Paragraph(prev, t._parent)) != "TableCaption":
             warn.append("таблица без заголовка «Таблица N – ...» над ней")
-        if nxt is not None and nxt.tag == qn("w:p") and "".join(nxt.itertext()).strip():
-            nxt.addprevious(OxmlElement("w:p"))
+        if nxt is not None and nxt.tag == qn("w:p"):
+            nxt_p = Paragraph(nxt, t._parent)
+            # A blank line separates the table from the following text.
+            # The continuation caption must stay against the next part.
+            if nxt_p.text.strip() and not nxt_p.text.strip().startswith("Продолжение таблицы"):
+                nxt.addprevious(OxmlElement("w:p"))
     # heading spacing, dashes, lint data
     prev = None
     text_all, figs, tabs, apps, cites, bib, in_bib, holes = [], [], [], [], [], [], False, []
@@ -591,7 +666,8 @@ def cmd_fix(docp, pdf=False):
             figs.append(tx.split()[1] if len(tx.split()) > 1 else "?")
             if tx.endswith("."): warn.append(f"точка в конце подписи: {tx[:50]}")
         elif sn == "TableCaption":
-            tabs.append(tx.split()[1] if len(tx.split()) > 1 else "?")
+            if not tx.startswith("Продолжение таблицы"):
+                tabs.append(tx.split()[1] if len(tx.split()) > 1 else "?")
         elif sn == "AppendixHeading":
             apps.append(tx.split()[1] if len(tx.split()) > 1 else "?")
         elif in_bib and re.match(r"^\[\d+\]", tx):
@@ -635,7 +711,62 @@ def cmd_fix(docp, pdf=False):
     print("\n".join(dict.fromkeys(warn)) or "lint: ok")
 
 
-JS = r"""var a=WScript.Arguments,w=new ActiveXObject("Word.Application"),d=null,f=0;
+JS = r"""function paraBefore(table){
+var r=table.Range.Duplicate;r.Collapse(1);if(r.Start<=0)return null;
+r.Move(1,-1);return r.Paragraphs(1);}
+function plain(text){return String(text).replace(/\r|\u0007/g,"").replace(/^\s+|\s+$/g,"");}
+function tableNum(text){
+var m=/^(?:Таблица|Продолжение таблицы)\s+(\S+)/.exec(plain(text));
+return m?m[1].replace(/[.,;:]$/,""):"";}
+function startsPage(p){var q=p.Previous();return !q||q.Range.Information(3)<p.Range.Information(3);}
+function asTable(o){try{return o&&o.Rows&&o.Rows.Count>0?o:null;}catch(e){return null;}}
+function tableNear(d,pos){
+var best=null,gap=9999,i,st,df;
+for(i=1;i<=d.Tables.Count;i++){st=d.Tables(i).Range.Start;df=Math.abs(st-pos);if(df<gap){gap=df;best=d.Tables(i);}}
+return gap<40?best:null;}
+function setCaption(p,text){
+var r=p.Range.Duplicate;r.End=r.End-1;r.Text=text;
+try{p.Style="TableCaption";}catch(e){}
+p.Format.Alignment=0;p.Format.FirstLineIndent=0;p.Format.LeftIndent=0;p.Format.KeepWithNext=true;p.Format.SpaceBefore=18;p.Format.SpaceAfter=0;}
+function copyHead(src,dst){
+var nr=dst.Rows.Add(dst.Rows(1)),c,s,dv,n=src.Cells.Count;
+nr.HeadingFormat=true;nr.AllowBreakAcrossPages=false;
+for(c=1;c<=n;c++){
+s=src.Cells(c).Range.Duplicate;dv=nr.Cells(c).Range.Duplicate;s.End=s.End-1;dv.End=dv.End-1;
+dv.FormattedText=s.FormattedText;dv.ParagraphFormat.Alignment=1;
+try{nr.Cells(c).Width=src.Cells(c).Width;}catch(e){}}
+return nr;}
+function continueTables(d){
+var skip={},made=0,guard=0,i,t,k,p0,r,at,cap,num,rowStart,nt,gap,acted;
+while(guard++<80){
+try{d.Repaginate();}catch(e){}
+acted=false;
+for(i=1;i<=d.Tables.Count;i++){
+t=d.Tables(i);
+try{if(t.NestingLevel>1)continue;}catch(e){}
+k=String(t.Range.Start);if(skip[k]||t.Rows.Count<2)continue;
+p0=t.Rows(1).Range.Information(3);at=0;
+for(r=2;r<=t.Rows.Count;r++){if(t.Rows(r).Range.Information(3)!=p0){at=r;break;}}
+if(!at)continue;
+cap=paraBefore(t);num=cap?tableNum(cap.Range.Text):"";
+if(at<3){
+if(cap&&num&&!cap.Format.PageBreakBefore&&!startsPage(cap)){cap.Format.PageBreakBefore=true;acted=true;break;}
+skip[k]=1;continue;}
+if(!num){skip[k]=1;continue;}
+rowStart=t.Rows(at).Range.Start;
+try{nt=asTable(t.Split(t.Rows(at)));}catch(e){skip[k]=1;continue;}
+if(!nt)nt=tableNear(d,rowStart);
+if(!nt){skip[k]=1;continue;}
+gap=paraBefore(nt);
+if(!gap||plain(gap.Range.Text).length){
+var ins=nt.Range.Duplicate;ins.Collapse(1);ins.InsertParagraphBefore();gap=paraBefore(nt);}
+if(!gap){skip[k]=1;continue;}
+setCaption(gap,"Продолжение таблицы "+num);
+try{copyHead(t.Rows(1),nt);}catch(e){}
+made++;acted=true;break;}
+if(!acted)break;}
+return made;}
+var a=WScript.Arguments,w=new ActiveXObject("Word.Application"),d=null,f=0;
 w.Visible=false;w.DisplayAlerts=0;
 try{d=w.Documents.Open(a(0),false,false,false);
 for(var i=1;i<=d.Paragraphs.Count;i++){var p=d.Paragraphs(i);
@@ -646,6 +777,7 @@ for(var k=0;k<3;k++){var st=d.Styles(-20-k),pf=st.ParagraphFormat;pf.Alignment=0
 pf.LeftIndent=w.CentimetersToPoints(0.5*k);pf.RightIndent=0;st.Font.Name="Times New Roman";st.Font.Size=14;}
 for(k=1;k<=d.TablesOfContents.Count;k++)d.TablesOfContents(k).Update();
 d.Fields.Update();for(k=1;k<=d.TablesOfContents.Count;k++)d.TablesOfContents(k).Update();
+var tc=continueTables(d);
 var n=d.ComputeStatistics(2),L=[];
 for(k=2;k<=n;k++){var s=d.GoTo(1,1,k).Start,e=(k<n)?d.GoTo(1,1,k+1).Start:d.Content.End,g=d.Range(s,e);
 var c=g.Text.replace(/\s/g,"").length;if(c<150&&g.Paragraphs(1).OutlineLevel==10&&g.InlineShapes.Count==0&&g.Tables.Count==0)L.push("layout: стр. "+k+" почти пустая ("+c+" знаков)");}
@@ -654,7 +786,7 @@ if(nx&&nx.Range.Information(3)!=pg)L.push("layout: стр. "+pg+": рисуно�
 if(pv&&pv.Range.Information(3)<pg){var gap=(d.PageSetup.PageHeight-d.PageSetup.BottomMargin-pv.Range.Characters.Last.Information(6))/17.7;
 if(gap>8)L.push("layout: стр. "+(pg-1)+": пусто ~"+Math.round(gap)+" строк внизу, рисунок перенесен на стр. "+pg+" (уменьшите w или поставьте следующий абзац перед рисунком)");}}
 d.Save();if(a.length>1)d.ExportAsFixedFormat(a(1),17);
-WScript.Echo("pages="+n+" formulas_converted="+f+(a.length>1?" pdf="+a(1):"")+(L.length?"\n"+L.join("\n"):""));}
+WScript.Echo("pages="+n+" formulas_converted="+f+" tables_continued="+tc+(a.length>1?" pdf="+a(1):"")+(L.length?"\n"+L.join("\n"):""));}
 catch(err){WScript.Echo("COM error: "+err.message);}
 try{if(d)d.Close(0);}catch(e2){}w.Quit(0);"""
 

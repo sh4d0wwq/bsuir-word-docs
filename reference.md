@@ -32,7 +32,7 @@
 - `Таблица 1.2 – Заголовок` above, left-aligned, no dot; numbering like figures; appendix `Таблица Б.2`. Reference each table in text; explain conclusions from it.
 - Column/row headings capitalized, nominative singular, no abbreviations; subheadings lowercase. Units via comma: `Время, с`. No «№ п/п» column (number inside the first cell: `1 Динамическая ошибка`). No diagonal split cells. Same decimals per column; missing data → `–`, no empty cells.
 - Notes to a table: last row above the bottom line `Примечание – ...`.
-- Continuation on a new page: `Продолжение таблицы 1.2` + repeated head (script repeats the head row).
+- Continuation on a new page is done by `fix`, not in the markup. The table is split at the page boundary. Above every next part, left-aligned and without the title: `Продолжение таблицы 1.2`. The head row is repeated. A head left alone at the bottom of a page is moved to the next page together with the table.
 - Little data → text with dot leaders instead of a table.
 
 ## Notes, footnotes
@@ -56,4 +56,4 @@ Numbered `[n]` in order of first citation in the text; every entry cited. Lectur
 ```
 
 ## Schemes/algorithms in figures
-Flowcharts per ГОСТ 19.701–90; electrical schemes per ГОСТ 2.701–2008 (Э1 structural, Э2 functional, Э3 principal); graphic document codes `ГУИР.421233.001Э1`.
+Flowcharts per ГОСТ 19.701–90 (build them with [flowcharts.md](flowcharts.md)); electrical schemes per ГОСТ 2.701–2008 (Э1 structural, Э2 functional, Э3 principal); graphic document codes `ГУИР.421233.001Э1`.

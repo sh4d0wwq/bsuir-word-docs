@@ -2,7 +2,7 @@
 
 Cursor agent skill that creates Word documents per BSUIR standard СТП 01–2017: отчеты по лабораторным работам, пояснительные записки к курсовым и дипломным проектам.
 
-Features: title page, automatic contents, Word-numbered headings (1 / 1.1 / 1.1.1) and lists («–», «1)», «а)»), formulas (Word equations), tables, figures, appendices, lint for missing references and placeholders, layout checks and page previews.
+Features: title page, automatic contents, Word-numbered headings (1 / 1.1 / 1.1.1) and lists («–», «1)», «а)»), formulas (Word equations), tables, figures, appendices, lint for missing references and placeholders, layout checks and page previews. Flowcharts per ГОСТ 19.701–90 from a short text description: PNG for the document plus an editable `.drawio` file (open in [draw.io](https://app.diagrams.net/); export to Visio `.vsdx` from there).
 
 ## Requirements
 
@@ -16,10 +16,10 @@ Features: title page, automatic contents, Word-numbered headings (1 / 1.1 / 1.1.
 
 ```powershell
 git clone https://github.com/sh4d0wwq/bsuir-word-docs "$HOME/.cursor/skills/bsuir-word-docs"
-pip install python-docx pymupdf
+pip install python-docx pymupdf pillow
 ```
 
-`pymupdf` is only needed for `preview` (page images).
+`pymupdf` is only needed for `preview` (page images), `pillow` for flowcharts.
 
 2. Install uv if you do not have it:
 
@@ -59,3 +59,4 @@ Unknown data (ФИО, группа, тема…) is left as `[[placeholders]]` a
 - `SKILL.md` — workflow, config and markup for the agent
 - `reference.md` — writing rules from the standard
 - `scripts/bsuir_docx.py` — `init` / `add` / `fix` / `build` / `preview` builder
+- `flowcharts.md`, `scripts/flowchart.py` — flowcharts (ГОСТ 19.701–90) → PNG + `.drawio`; loaded by the agent only when needed

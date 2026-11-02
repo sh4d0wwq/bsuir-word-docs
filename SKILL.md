@@ -38,9 +38,22 @@ Later edits to an existing document without sources: MCP point edits (below), th
  "student":"И. И. Иванов","group":"351001","teacher":"П. П. Петров","year":2026,
  "code":"БГУИР КП 1-40 01 01 012 ПЗ"}
 ```
-Optional: `signers` [[label,name],...] (overrides student/teacher; diploma: Студент, Руководитель, Консультанты:, Нормоконтролер, Рецензент), `head`+`dept_short` (diploma "К защите допустить"), `abstract` (lines by \n; RU: РЕФЕРАТ page), `abstract_header`, `assignment_pages` (placeholder pages for бланк задания), `toc` (default true for course/diploma, false for lab), `section_new_page` (default true: every level-1 heading starts a new page), `title_block` (override, `**bold**`, \n; add `Вариант N` here for labs), `header`, `city`, `sign_tab_cm`.
-Default `title_block` — lab: `**ОТЧЕТ** / по лабораторной работе № {number} / по дисциплине «{discipline}» / на тему / «{topic}»`; course: `**ПОЯСНИТЕЛЬНАЯ ЗАПИСКА** / к курсовому проекту / по дисциплине «…» / на тему / **ТЕМА**`; diploma: `**ПОЯСНИТЕЛЬНАЯ ЗАПИСКА** / к дипломному проекту / на тему / **ТЕМА**` (` / ` = line break `\n`). Signers default: lab `Выполнил: студент гр. {group}` / `Проверил:`; course `Студент гр. {group}` / `Руководитель`.
-Names on the title page are full, not abbreviated. Code format: `БГУИР ДП|ДР|КП|КР 1-XX XX XX [XX] NNN ПЗ`.
+Optional: `signers` [[label,name],...] (diploma: Студент, Руководитель, Консультанты:, Нормоконтролер, Рецензент; course uses the name only), `head`+`dept_short` (diploma "К защите допустить"), `abstract` (lines by \n; RU: РЕФЕРАТ page), `abstract_header`, `assignment_pages` (placeholder pages for бланк задания), `toc` (default true for course/diploma, false for lab), `section_new_page` (default true: every level-1 heading starts a new page), `title_block` (lab and diploma override, `**bold**`, \n; add `Вариант N` here for labs), `header`, `city`, `sign_tab_cm`.
+Default `title_block` — lab: `**ОТЧЕТ** / по лабораторной работе № {number} / по дисциплине «{discipline}» / на тему / «{topic}»`; diploma: `**ПОЯСНИТЕЛЬНАЯ ЗАПИСКА** / к дипломному проекту / на тему / **ТЕМА**` (` / ` = line break `\n`). Signers default: lab `Выполнил: студент гр. {group}` / `Проверил:`.
+Course title page is the copy in [samples/title_course.docx](samples/title_course.docx): the title sheet of a departmental пояснительная записка, with variable fields already replaced by placeholders. `build` fills them from cfg and leaves a placeholder when the value is missing:
+
+| Placeholder | cfg |
+|---|---|
+| `[[факультет]]` | `faculty` |
+| `[[кафедра]]` | `department` |
+| `[[дисциплина]]` | `discipline` |
+| `[[ТЕМА]]` | `topic` (capitals, 16 pt bold) |
+| `[[шифр]]` | `code` (16 pt), format `БГУИР ДП\|ДР\|КП\|КР 1-XX XX XX [XX] NNN ПЗ` |
+| `[[студент]]` | `student`, or the first `signers` name |
+| `[[руководитель]]` | `teacher`, or the second `signers` name |
+| `[[год]]` | `year` |
+
+The sheet keeps the sample wording and spacing: «Дисциплина: …» under the department, «ПОЯСНИТЕЛЬНАЯ ЗАПИСКА / к курсовому проекту / на тему:», «Студент» and «Руководитель» with the name at the right, «Минск» and the year at the bottom. Names are written as on that sheet («Фамилия И.О.»). Lab and diploma names are full, not abbreviated.
 
 ## Markup (one line = one paragraph)
 | Line | Result |
@@ -52,8 +65,8 @@ Names on the title page are full, not abbreviated. Code format: `БГУИР ДП
 | `- пункт;` or `1) ` / `а) ` / `  - ` or `  а) ` / `  1) ` | list item / nested level (Word lists, numbering restarts per list) |
 | `$$ P=U^2/R, $$ (2.1)` | centered formula (UnicodeMath: `x_1`, `a/b`, `√(x)`, `∑_(i=1)^n`; no spaces inside products like `k(k-1)`), number at right |
 | `где P – мощность, Вт;` + `  U – напряжение, В.` | explanation after formula |
-| `![](img.png){w=15}` then `Рисунок 2.1 – Название` | centered dummy PNG (the file is not read; width cm ≤ 16.5), caption |
-| `Таблица 2.1 – Название` then `\| a \| b \|` rows | caption + table (1st row = head; empty cell → «–») |
+| `![](img.png){w=15}` then `Рисунок 2.1 – Название` | centered figure if the file exists (no `{w=}` → true size, e.g. flowcharts), otherwise a dummy PNG (width cm ≤ 16.5), caption |
+| `Таблица 2.1 – Название` then `\| a \| b \|` rows | caption + table (1st row = head; empty cell → «–»). A page break is formatted by `fix`: `Продолжение таблицы 2.1` and the same head, no title. Do not write that line in the markup |
 | ```` ``` ```` block | code listing (Courier New 12, no hyphenation) |
 | `@code path` | listing with the contents of a text file |
 | `\newpage` | page break |
@@ -74,3 +87,4 @@ Inline: `**bold**`, `*italic*`, `U_{вх}`, `10^{3}`, placeholder `[[...]]`. Tex
 - **diploma**: title (`head`, all signers) → СОДЕРЖАНИЕ → РЕФЕРАТ (850–1200 chars, 1 page; header line `ТЕМА : дипломный проект / И. О. Фамилия. – Минск : БГУИР, 2026. – п.з. – 79 с., чертежей (плакатов) – 6 л. формата А1.`) → задание (`assignment_pages: 2`) → перечень обозначений (if any) → Введение (≤2 pages: goal, tasks, section summary) → main sections → ТЭО (≤18 %) → охрана труда/энергосбережение (5–7 %) → Заключение (≤2 pages, «разработана», «исследованы»...) → sources → приложения → перечень элементов → ведомость. Target 60–80 pages.
 
 Writing rules (numbers, formulas, tables, figures, bibliography, appendices): read [reference.md](reference.md) before writing content.
+Flowcharts (схема алгоритма / блок-схема, ГОСТ 19.701–90): only when the document needs one, read [flowcharts.md](flowcharts.md).
